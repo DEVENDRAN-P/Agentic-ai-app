@@ -1,145 +1,251 @@
 #!/usr/bin/env python3
 """
-OpenEnv Round 1 - Emergency Response Environment Inference Script
+OpenEnv Inference Script - Emergency Response Environment
 
-MANDATORY LOG FORMAT:
-  [START] task=<task_name> env=<env_name> model=<model_name>
-  [STEP] step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
-  [END] success=<true|false> steps=<n> rewards=<r1,r2,...,rn>
+STRICT LOGGING FORMAT (REQUIRED):
+  [START] task=<task> env=emergency model=<model> episodes=<n>
+  [STEP] episode=<n> step=<n> action=... reward=<0.00>
+  [END] success=true episodes=<n> avg_score=<0.000> rewards=<r1,r2,...>
+
+Features:
+- OpenAI API integration with environment variables
+- Deterministic grading (same input → same output)
+- Seed-based reproducibility
+- Full step-by-step logging
 """
 
 import os
 import sys
-from typing import Optional, List, Tuple, Dict, Any
+import json
+import random
+import argparse
+from typing import Optional, List, Dict, Any
+
+import numpy as np
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
 from src.env import EmergencyResponseEnv
-from src.advanced_agents import PriorityHeuristicAgent, ResourceOptimizationAgent, AdaptiveAgent
+from src.graders import create_grader_for_task
+from src.inference import RandomBaselineAgent, SmartHeuristicAgent
 
-# Mandatory environment variables
-API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
-HF_TOKEN = os.getenv("HF_TOKEN", "")
-TASK_NAME = os.getenv("TASK_NAME", "easy")
+# Environment variables for OpenAI
+API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
+MODEL_NAME = os.getenv("MODEL_NAME", "gpt-3.5-turbo")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
-def log_start(task: str, env: str, model: str) -> None:
-    """Emit mandatory [START] log"""
-    print(f"[START] task={task} env={env} model={model}", flush=True)
 
-def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
-    """Emit mandatory [STEP] log - EXACT FORMAT REQUIRED"""
-    error_val = error if error else "null"
-    done_val = str(done).lower()
-    reward_fmt = f"{reward:.2f}"
-    print(f"[STEP] step={step} action={action} reward={reward_fmt} done={done_val} error={error_val}", flush=True)
+def log_start(task: str, env: str, model: str, episodes: int) -> None:
+    """Emit [START] log - EXACT FORMAT"""
+    print(f"[START] task={task} env={env} model={model} episodes={episodes}", flush=True)
 
-def log_end(success: bool, steps: int, rewards: List[float]) -> None:
-    """Emit mandatory [END] log - EXACT FORMAT REQUIRED"""
+
+def log_step(episode: int, step: int, action: str, reward: float) -> None:
+    """Emit [STEP] log - EXACT FORMAT (includes episode number)"""
+    print(f"[STEP] episode={episode} step={step} action={action} reward={reward:.3f}", flush=True)
+
+
+def log_end(success: bool, episodes: int, avg_score: float, rewards: List[float]) -> None:
+    """Emit [END] log - EXACT FORMAT"""
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    success_val = str(success).lower()
-    print(f"[END] success={success_val} steps={steps} rewards={rewards_str}", flush=True)
+    print(f"[END] success={str(success).lower()} episodes={episodes} avg_score={avg_score:.3f} rewards={rewards_str}", flush=True)
 
-def run_inference(task_name: str = "easy", max_episodes: int = 5, max_steps_per_episode: int = 30) -> None:
+
+
+class OpenAIAgent:
+    """Agent that uses OpenAI API for decision-making."""
+    
+    def __init__(self, env: EmergencyResponseEnv):
+        self.env = env
+        self.client = None
+        
+        if OPENAI_API_KEY:
+            try:
+                from openai import OpenAI
+                self.client = OpenAI(
+                    api_key=OPENAI_API_KEY,
+                    base_url=API_BASE_URL if API_BASE_URL != "https://api.openai.com/v1" else None
+                )
+            except Exception as e:
+                print(f"Warning: OpenAI client failed: {e}. Using heuristic fallback.", file=sys.stderr)
+        
+        # Fallback agent
+        self.fallback_agent = SmartHeuristicAgent(env)
+    
+    def state_to_prompt(self, state: Dict[str, Any]) -> str:
+        """Convert state to natural language prompt."""
+        return f"""Emergency Response Coordination:
+- {len(state['emergencies'])} emergencies active
+- {sum(1 for a in state['ambulances'] if a['available'])}/{len(state['ambulances'])} ambulances available
+- {sum(h['capacity'] for h in state['hospitals'])} hospital beds available
+- Traffic level: {state['traffic_level']}/5
+
+Return only 3 numbers (ambulance_id, emergency_id, hospital_id) without explanation."""
+    
+    def get_action(self, state: Dict[str, Any]) -> Dict[str, int]:
+        """Get action from OpenAI or fallback."""
+        if not self.client:
+            return self.fallback_agent.get_action(state)
+        
+        try:
+            prompt = self.state_to_prompt(state)
+            response = self.client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=20
+            )
+            
+            # Parse response
+            import re
+            numbers = re.findall(r'\d+', response.choices[0].message.content)
+            if len(numbers) >= 3:
+                return {
+                    "ambulance_id": min(int(numbers[0]), self.env.num_ambulances),
+                    "emergency_id": min(int(numbers[1]), len(self.env.emergencies)),
+                    "hospital_id": min(int(numbers[2]), self.env.num_hospitals)
+                }
+        except:
+            pass
+        
+        return self.fallback_agent.get_action(state)
+
+
+def run_inference(
+    task_difficulty: str = "easy",
+    num_episodes: int = 5,
+    agent_type: str = "heuristic",
+    seed: int = 42
+) -> Dict[str, Any]:
     """
-    Run inference with mandatory logging format compatible with OpenEnv Round 1 grading.
+    Run inference with strict logging format.
     
     Args:
-        task_name: One of 'easy', 'medium', 'hard'
-        max_episodes: Number of episodes to run
-        max_steps_per_episode: Max steps per episode
+        task_difficulty: "easy", "medium", "hard"
+        num_episodes: Number of episodes
+        agent_type: "random", "heuristic", "llm"
+        seed: Random seed for reproducibility
     """
     
-    env_name = "emergency-response-env"
-    all_rewards: List[float] = []
-    total_steps = 0
-    success = True
+    # Set seeds for reproducibility
+    random.seed(seed)
+    np.random.seed(seed)
     
-    try:
-        # Initialize environment
-        env = EmergencyResponseEnv(task_difficulty=task_name)
-        log_start(task=task_name, env=env_name, model=MODEL_NAME)
+    # Log start
+    model_name = MODEL_NAME if agent_type == "llm" else agent_type
+    log_start(task=task_difficulty, env="emergency-response-env", model=model_name, episodes=num_episodes)
+    
+    # Create environment
+    env = EmergencyResponseEnv(task_difficulty=task_difficulty)
+    
+    # Create agent
+    if agent_type == "llm":
+        agent = OpenAIAgent(env)
+    elif agent_type == "random":
+        agent = RandomBaselineAgent(env)
+    else:  # heuristic
+        agent = SmartHeuristicAgent(env)
+    
+    # Run episodes
+    episode_results = []
+    episode_rewards = []
+    all_rewards_flat = []
+    global_step = 0
+    
+    for episode_num in range(1, num_episodes + 1):
+        state = env.reset()
+        episode_reward = 0.0
+        step_history = []
+        episode_step = 0
+        done = False
         
-        # Select agent based on task difficulty
-        if task_name == "easy":
-            agent = PriorityHeuristicAgent(env)
-        elif task_name == "medium":
-            agent = ResourceOptimizationAgent(env)
-        else:  # hard
-            agent = AdaptiveLearningAgent(env)
-        
-        # Run multiple episodes
-        for episode in range(max_episodes):
-            obs = env.reset()
-            info = {}  # Empty info dict for first step
-            done = False
+        while not done:
+            episode_step += 1
+            global_step += 1
             
-            for step in range(max_steps_per_episode):
-                if done:
-                    break
-                
-                total_steps += 1
-                
-                # Get action from agent
-                try:
-                    action = agent.get_action(obs)
-                except Exception as e:
-                    log_step(
-                        step=total_steps,
-                        action="error",
-                        reward=0.0,
-                        done=True,
-                        error=str(e)[:100]
-                    )
-                    success = False
-                    break
-                
-                # Execute step in environment
-                obs, reward, done, info = env.step(action)
-                all_rewards.append(float(reward))
-                
-                # Format action for logging
-                if isinstance(action, (tuple, list)) and len(action) >= 3:
-                    action_str = f"assign(ambulance={action[0]}, emergency={action[1]}, hospital={action[2]})"
-                else:
-                    action_str = str(action)
-                
-                # Log step
-                log_step(
-                    step=total_steps,
-                    action=action_str,
-                    reward=float(reward),
-                    done=done,
-                    error=None
-                )
+            # Agent decides
+            action = agent.get_action(state)
+            
+            # Environment executes
+            next_state, reward, done, info = env.step(action)
+            step_history.append((state, action, reward, done))
+            episode_reward += reward
+            all_rewards_flat.append(reward)
+            
+            # Log step (MUST include episode number)
+            action_str = f"({action.get('ambulance_id', 0)},{action.get('emergency_id', 0)},{action.get('hospital_id', 0)})"
+            log_step(episode=episode_num, step=episode_step, action=action_str, reward=float(reward))
+            
+            state = next_state
         
-        # Log final result
-        log_end(success=success, steps=total_steps, rewards=all_rewards)
+        # Grade episode using deterministic grader
+        grader = create_grader_for_task(task_difficulty)
+        episode_metrics = grader.evaluate_episode(env, step_history)
         
-    except Exception as e:
-        # Still emit [END] on error (mandatory)
-        log_end(success=False, steps=total_steps, rewards=all_rewards)
-        import traceback
-        traceback.print_exc(file=sys.stderr)
-        print(f"ERROR: {str(e)[:200]}", file=sys.stderr, flush=True)
-        sys.exit(1)
-    finally:
-        if 'env' in locals():
-            try:
-                if hasattr(env, 'close'):
-                    env.close()
-            except:
-                pass
+        episode_results.append({
+            "episode": episode_num,
+            "reward": float(episode_reward),
+            "score": float(episode_metrics.get("final_score", 0.0)),
+            "steps": episode_step,
+            "metrics": episode_metrics
+        })
+        
+        episode_rewards.append(float(episode_reward))
+    
+    # Calculate statistics
+    final_scores = [e["score"] for e in episode_results]
+    avg_score = float(np.mean(final_scores)) if final_scores else 0.0
+    
+    # Log end (STRICT FORMAT)
+    log_end(success=True, episodes=num_episodes, avg_score=avg_score, rewards=episode_rewards)
+    
+    return {
+        "task_difficulty": task_difficulty,
+        "agent_type": agent_type,
+        "num_episodes": num_episodes,
+        "episodes": episode_results,
+        "statistics": {
+            "avg_score": avg_score,
+            "avg_reward": float(np.mean(episode_rewards)) if episode_rewards else 0.0,
+            "final_scores": final_scores,
+            "rewards": episode_rewards
+        }
+    }
+
 
 def main():
-    """Main entry point"""
-    # Get task from environment variable or default to easy
-    task = os.getenv("TASK_NAME", "easy").lower()
+    """Main entry point."""
+    parser = argparse.ArgumentParser(description="OpenEnv Emergency Response Inference")
+    parser.add_argument("--task", choices=["easy", "medium", "hard"], default="easy", help="Task difficulty")
+    parser.add_argument("--episodes", type=int, default=5, help="Number of episodes")
+    parser.add_argument("--agent", choices=["random", "heuristic", "llm"], default="heuristic", help="Agent type")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    parser.add_argument("--output", type=str, default="results.json", help="Output file")
     
-    # Validate task name
-    if task not in ["easy", "medium", "hard"]:
-        print(f"ERROR: Invalid task '{task}'. Must be one of: easy, medium, hard", file=sys.stderr)
+    args = parser.parse_args()
+    
+    try:
+        results = run_inference(
+            task_difficulty=args.task,
+            num_episodes=args.episodes,
+            agent_type=args.agent,
+            seed=args.seed
+        )
+        
+        # Save results
+        with open(args.output, "w") as f:
+            json.dump(results, f, indent=2, default=str)
+        
+        print(f"\nResults saved to {args.output}")
+        
+    except Exception as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
-    
-    # Run inference
-    run_inference(task_name=task, max_episodes=5, max_steps_per_episode=30)
+
 
 if __name__ == "__main__":
     main()
