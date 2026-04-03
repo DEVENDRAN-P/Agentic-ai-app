@@ -292,6 +292,182 @@ def run_inference(
     
     return summary
 
+def run_advanced_experiment(
+    task_difficulty: str = "medium",
+    num_episodes: int = 5,
+    agent_type: str = "heuristic",
+    custom_parameters: dict = None,
+    verbose: bool = True
+) -> Dict[str, Any]:
+    """
+    Run advanced experiment with custom environment parameters.
+    
+    This demonstrates the "Advanced Usage" from README - customizing
+    environment parameters like num_emergencies, hospital_capacity, etc.
+    
+    Args:
+        task_difficulty: "easy", "medium", or "hard"
+        num_episodes: Number of episodes to run
+        agent_type: "random" or "heuristic"
+        custom_parameters: Dict with custom parameters like:
+            {
+                "num_emergencies": 10,
+                "hospital_capacity": 2,
+                "traffic_factor": 2.5
+            }
+        verbose: Print debug info
+    
+    Returns:
+        Results summary
+    
+    Example:
+        results = run_advanced_experiment(
+            task_difficulty="medium",
+            num_episodes=3,
+            agent_type="heuristic",
+            custom_parameters={
+                "num_emergencies": 10,
+                "hospital_capacity": 2,
+                "traffic_factor": 2.5
+            }
+        )
+    """
+    if verbose:
+        print(f"\n[ADVANCED EXPERIMENT]")
+        print(f"Task: {task_difficulty}")
+        print(f"Episodes: {num_episodes}")
+        print(f"Agent: {agent_type}")
+        if custom_parameters:
+            print(f"Custom Parameters: {custom_parameters}")
+        print("-" * 60)
+    
+    # Create environment and agent
+    env = EmergencyResponseEnv(task_difficulty=task_difficulty)
+    
+    # Apply custom parameters if provided
+    if custom_parameters:
+        env.set_task_parameters(**custom_parameters)
+    
+    # Create agent
+    if agent_type == "random":
+        agent = RandomBaselineAgent(env)
+    else:
+        agent = SmartHeuristicAgent(env)
+    
+    # Run episodes
+    episode_results = []
+    total_rewards = []
+    
+    for episode in range(num_episodes):
+        state = env.reset()
+        total_reward = 0.0
+        step_history = []
+        
+        done = False
+        while not done:
+            action = agent.get_action(state)
+            next_state, reward, done, info = env.step(action)
+            step_history.append((state, action, reward, done))
+            total_reward += reward
+            state = next_state
+        
+        grader = create_grader_for_task(env.task_difficulty)
+        episode_metrics = grader.evaluate_episode(env, step_history)
+        
+        episode_results.append({
+            "episode": episode + 1,
+            "total_reward": total_reward,
+            "metrics": episode_metrics,
+            "env_summary": env.get_episode_summary()
+        })
+        total_rewards.append(total_reward)
+        
+        if verbose:
+            print(f"Episode {episode + 1}: Score={episode_metrics['final_score']:.3f}, Reward={total_reward:.3f}")
+    
+    # Compute statistics
+    summary = {
+        "task_difficulty": task_difficulty,
+        "agent_type": agent_type,
+        "num_episodes": num_episodes,
+        "custom_parameters": custom_parameters or {},
+        "episodes": episode_results,
+        "statistics": {
+            "final_score": {
+                "mean": float(np.mean([e["metrics"]["final_score"] for e in episode_results])),
+                "std": float(np.std([e["metrics"]["final_score"] for e in episode_results])),
+                "min": float(np.min([e["metrics"]["final_score"] for e in episode_results])),
+                "max": float(np.max([e["metrics"]["final_score"] for e in episode_results]))
+            },
+            "total_reward": {
+                "mean": float(np.mean(total_rewards)),
+                "std": float(np.std(total_rewards)),
+                "min": float(np.min(total_rewards)),
+                "max": float(np.max(total_rewards))
+            }
+        }
+    }
+    
+    if verbose:
+        print(f"\nAverage Score: {summary['statistics']['final_score']['mean']:.3f} ± {summary['statistics']['final_score']['std']:.3f}")
+    
+    return summary
+
+
+def run_multi_task_experiment(
+    agent_type: str = "heuristic",
+    episodes_per_task: int = 5,
+    verbose: bool = True
+) -> Dict[str, Any]:
+    """
+    Run multi-task training experiment across all difficulties.
+    
+    This demonstrates learning across task progression:
+    easy -> medium -> hard
+    
+    Args:
+        agent_type: "random" or "heuristic"
+        episodes_per_task: Episodes per difficulty level
+        verbose: Print debug info
+    
+    Returns:
+        Results summary with performance across all tasks
+    """
+    if verbose:
+        print(f"\n[MULTI-TASK EXPERIMENT]")
+        print(f"Agent: {agent_type}")
+        print(f"Episodes per task: {episodes_per_task}")
+        print("=" * 60)
+    
+    all_results = {}
+    
+    for difficulty in ["easy", "medium", "hard"]:
+        if verbose:
+            print(f"\nTraining on {difficulty.upper()} task...")
+        
+        results = run_inference(
+            task_difficulty=difficulty,
+            num_episodes=episodes_per_task,
+            agent_type=agent_type,
+            verbose=verbose and False,  # Reduce verbosity
+            use_open_env_format=False
+        )
+        
+        all_results[difficulty] = results
+    
+    # Analyze progression
+    if verbose:
+        print("\n" + "=" * 60)
+        print("[PROGRESSION ANALYSIS]")
+        for difficulty in ["easy", "medium", "hard"]:
+            score = all_results[difficulty]['statistics']['final_score']['mean']
+            print(f"  {difficulty.upper()}: {score:.3f}")
+    
+    return {
+        "agent_type": agent_type,
+        "episodes_per_task": episodes_per_task,
+        "results_by_difficulty": all_results
+    }
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

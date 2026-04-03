@@ -49,12 +49,16 @@ class EmergencyResponseEnv:
         self.task_difficulty = task_difficulty
         self._init_task_parameters()
         
-        # Tracking metrics
+        # Episode tracking metrics
         self.total_response_time = 0
         self.high_severity_handled = 0
         self.total_high_severity = 0
         self.step_count = 0
         self.max_steps = 100
+        
+        # Episode statistics (for summary)
+        self.episode_history = []
+        self.current_episode_stats = {}
         
         # Initialize state
         self.reset()
@@ -369,12 +373,206 @@ class EmergencyResponseEnv:
         """
         return self._get_state()
     
-    def render(self):
-        """Render environment state for visualization (optional)."""
+    def render(self, verbose: bool = False):
+        """
+        Render environment state for visualization and debugging.
+        
+        Args:
+            verbose: If True, print all emergencies and detailed metrics
+        """
         state = self._get_state()
-        print(f"\n=== Step {self.step_count} ===")
-        print(f"Emergencies: {len(state['emergencies'])} | Traffic: {state['traffic_level']}")
-        for e in state['emergencies'][:3]:
-            status = "✓ Assigned" if e['assigned'] else "✗ Waiting"
-            print(f"  E{e['id']}: Severity {e['severity']}, Waiting {e['time_waiting']}s [{status}]")
-        print(f"Available Ambulances: {sum(1 for a in state['ambulances'] if a['available'])}/{len(state['ambulances'])}")
+        traffic_bar = "#" * state['traffic_level'] + "-" * (5 - state['traffic_level'])
+        print(f"\n{'='*70}")
+        print(f"Step {self.step_count:3d} | Task: {self.task_difficulty.upper()} | Traffic: {traffic_bar}")
+        print(f"{'='*70}")
+        
+        # Emergencies status
+        print(f"\n[EMERGENCIES] ({len(state['emergencies'])} total)")
+        emergencies_to_show = state['emergencies'] if verbose else state['emergencies'][:4]
+        for e in emergencies_to_show:
+            status_icon = "DONE" if e['assigned'] else "WAIT"
+            severity_bar = "[" + "#" * e['severity'] + "-" * (10 - e['severity']) + "]"
+            print(f"  {status_icon} E{e['id']}: {severity_bar} Severity {e['severity']}/10 | Waiting {e['time_waiting']}s")
+        
+        if not verbose and len(state['emergencies']) > 4:
+            print(f"  ... and {len(state['emergencies']) - 4} more emergencies")
+        
+        # Ambulances status
+        available_count = sum(1 for a in state['ambulances'] if a['available'])
+        print(f"\n[AMBULANCES] ({available_count}/{len(state['ambulances'])} available)")
+        for a in state['ambulances']:
+            status = "Ready" if a['available'] else f"Busy ({a['busy_until']}s)"
+            location_marker = f"@L{a['location']}"
+            print(f"  A{a['id']}: {status:15} {location_marker}")
+        
+        # Hospitals status
+        print(f"\n[HOSPITALS] (Capacity Status)")
+        for h in state['hospitals']:
+            utilization = h['patients']
+            total = state.get('max_capacity', 5)
+            bar = "[" + "#" * utilization + "-" * (total - utilization) + "]"
+            print(f"  H{h['id']}: {bar} {h['patients']} patients | {h['capacity']} beds available | @L{h['location']}")
+        
+        # Performance metrics
+        print(f"\n[METRICS]")
+        print(f"  Response Time (Avg): {self.total_response_time / max(1, self.high_severity_handled):.1f}s")
+        print(f"  High-Severity Handled: {self.high_severity_handled}/{self.total_high_severity}")
+        assigned_count = sum(1 for e in state['emergencies'] if e['assigned'])
+        print(f"  Assignments: {assigned_count}/{len(state['emergencies'])}")
+        print(f"{'-'*70}\n")
+    
+    def get_metrics(self) -> Dict[str, Any]:
+        """
+        Get comprehensive episode metrics.
+        
+        Returns:
+            Dictionary with all tracked metrics
+        """
+        state = self._get_state()
+        assigned_emergencies = [e for e in self.emergencies if e['assigned_ambulance'] is not None]
+        unassigned_emergencies = [e for e in self.emergencies if e['assigned_ambulance'] is None]
+        
+        return {
+            "step_count": self.step_count,
+            "total_response_time": self.total_response_time,
+            "avg_response_time": self.total_response_time / max(1, len(assigned_emergencies)),
+            "high_severity_handled": self.high_severity_handled,
+            "total_high_severity": self.total_high_severity,
+            "emergencies_assigned": len(assigned_emergencies),
+            "emergencies_unassigned": len(unassigned_emergencies),
+            "ambulances_available": sum(1 for a in self.ambulances if a['available']),
+            "ambulances_busy": sum(1 for a in self.ambulances if not a['available']),
+            "hospital_total_patients": sum(h['patients'] for h in self.hospitals),
+            "hospital_total_capacity": sum(h['current_capacity'] for h in self.hospitals),
+            "avg_wait_time": np.mean([e['time_waiting'] for e in unassigned_emergencies]) if unassigned_emergencies else 0.0,
+            "traffic_level": self.traffic_level
+        }
+    
+    def set_task_parameters(self, **kwargs):
+        """
+        Set custom task parameters for advanced usage.
+        
+        Supported parameters:
+            - num_emergencies: Number of emergencies
+            - hospital_capacity: Capacity per hospital
+            - traffic_factor: Traffic delay multiplier
+            - initial_busy_ambulances: Number of initially busy ambulances
+            - emergency_spawn_rate: Rate of new emergency spawning
+        
+        Example:
+            env.set_task_parameters(
+                num_emergencies=10,
+                hospital_capacity=2,
+                traffic_factor=2.5
+            )
+        """
+        for key, value in kwargs.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+            else:
+                print(f"Warning: Unknown parameter '{key}'")
+    
+    def get_episode_summary(self) -> Dict[str, Any]:
+        """
+        Get comprehensive summary of current episode.
+        
+        Returns:
+            Dictionary with episode statistics and performance analysis
+        """
+        state = self._get_state()
+        assigned_emergencies = [e for e in self.emergencies if e['assigned_ambulance'] is not None]
+        unassigned_emergencies = [e for e in self.emergencies if e['assigned_ambulance'] is None]
+        
+        # Calculate statistics
+        avg_response_time = (self.total_response_time / len(assigned_emergencies)) if assigned_emergencies else 0.0
+        high_severity_percentage = (self.high_severity_handled / self.total_high_severity) if self.total_high_severity > 0 else 0.0
+        
+        # Calculate resource utilization
+        ambulance_utilization = len([a for a in self.ambulances if not a['available']]) / len(self.ambulances)
+        hospital_utilization = sum(h['patients'] for h in self.hospitals) / sum(h['max_capacity'] for h in self.hospitals) if self.hospitals else 0.0
+        
+        return {
+            "task_difficulty": self.task_difficulty,
+            "total_steps": self.step_count,
+            "total_response_time": self.total_response_time,
+            "avg_response_time": avg_response_time,
+            "high_severity_handled": self.high_severity_handled,
+            "total_high_severity": self.total_high_severity,
+            "high_severity_percentage": high_severity_percentage,
+            "emergencies_assigned": len(assigned_emergencies),
+            "emergencies_unassigned": len(unassigned_emergencies),
+            "total_emergencies": len(self.emergencies),
+            "ambulance_utilization": ambulance_utilization,
+            "hospital_utilization": hospital_utilization,
+            "avg_emergency_wait_time": np.mean([e['time_waiting'] for e in unassigned_emergencies]) if unassigned_emergencies else 0.0,
+            "max_emergency_wait_time": max([e['time_waiting'] for e in unassigned_emergencies], default=0),
+            "traffic_level_final": self.traffic_level
+        }
+    
+    def record_episode(self, agent_name: str = "unknown"):
+        """
+        Record episode to history for trend analysis.
+        
+        Args:
+            agent_name: Name of agent that ran this episode
+        """
+        summary = self.get_episode_summary()
+        summary["agent_name"] = agent_name
+        self.episode_history.append(summary)
+    
+    def get_episode_history(self) -> List[Dict[str, Any]]:
+        """Get history of all recorded episodes."""
+        return self.episode_history
+    
+    def analyze_trends(self) -> Dict[str, Any]:
+        """
+        Analyze trends across episode history.
+        
+        Returns:
+            Trend analysis including averages and improvements
+        """
+        if not self.episode_history:
+            return {"message": "No episode history available"}
+        
+        scores = [e.get('high_severity_percentage', 0) for e in self.episode_history]
+        response_times = [e.get('avg_response_time', 0) for e in self.episode_history]
+        resource_utils = [e.get('hospital_utilization', 0) for e in self.episode_history]
+        
+        return {
+            "num_episodes": len(self.episode_history),
+            "avg_high_severity_score": float(np.mean(scores)) if scores else 0.0,
+            "avg_response_time": float(np.mean(response_times)) if response_times else 0.0,
+            "avg_resource_utilization": float(np.mean(resource_utils)) if resource_utils else 0.0,
+            "improvement_trend": "improving" if len(scores) > 1 and scores[-1] > scores[0] else "stable",
+            "best_episode": max(self.episode_history, key=lambda x: x.get('high_severity_percentage', 0)) if self.episode_history else None,
+            "worst_episode": min(self.episode_history, key=lambda x: x.get('high_severity_percentage', 0)) if self.episode_history else None
+        }
+    
+    def validate_action_detailed(self, ambulance_id: int, emergency_id: int, hospital_id: int) -> Tuple[bool, List[str]]:
+        """
+        Validate action with detailed error messages.
+        
+        Returns:
+            (is_valid, list_of_errors)
+        """
+        errors = []
+        
+        # Check ambulance
+        if not (1 <= ambulance_id <= self.num_ambulances):
+            errors.append(f"Ambulance ID {ambulance_id} out of range [1-{self.num_ambulances}]")
+        elif not self.ambulances[ambulance_id - 1]['available']:
+            errors.append(f"Ambulance {ambulance_id} is not available")
+        
+        # Check emergency
+        if not (1 <= emergency_id <= len(self.emergencies)):
+            errors.append(f"Emergency ID {emergency_id} out of range [1-{len(self.emergencies)}]")
+        elif self.emergencies[emergency_id - 1]['assigned_ambulance'] is not None:
+            errors.append(f"Emergency {emergency_id} is already assigned")
+        
+        # Check hospital
+        if not (1 <= hospital_id <= self.num_hospitals):
+            errors.append(f"Hospital ID {hospital_id} out of range [1-{self.num_hospitals}]")
+        elif self.hospitals[hospital_id - 1]['current_capacity'] <= 0:
+            errors.append(f"Hospital {hospital_id} is at full capacity")
+        
+        return len(errors) == 0, errors
