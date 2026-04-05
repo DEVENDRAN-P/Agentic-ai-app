@@ -123,7 +123,8 @@ def run_inference(
     task_difficulty: str = "easy",
     num_episodes: int = 5,
     agent_type: str = "heuristic",
-    seed: int = 42
+    seed: int = 42,
+    debug: bool = False
 ) -> Dict[str, Any]:
     """
     Run inference with strict logging format.
@@ -133,6 +134,7 @@ def run_inference(
         num_episodes: Number of episodes
         agent_type: "random", "heuristic", "llm"
         seed: Random seed for reproducibility
+        debug: Enable debug output
     """
     
     # Set seeds for reproducibility
@@ -150,7 +152,7 @@ def run_inference(
     elif agent_type == "qlearn":
         agent = QLearningAgent(env)
     else:  # heuristic
-        agent = SmartHeuristicAgent(env)
+        agent = SmartHeuristicAgent(env, debug=debug)
     
     # Run episodes
     episode_results = []
@@ -256,6 +258,7 @@ def main():
     parser.add_argument("--agent", choices=["random", "heuristic", "qlearn", "llm"], default="heuristic", help="Agent type")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--output", type=str, default="results.json", help="Output file")
+    parser.add_argument("--debug", action="store_true", help="Enable debug output (shows agent decisions)")
     
     args = parser.parse_args()
     
@@ -264,7 +267,8 @@ def main():
             task_difficulty=args.task,
             num_episodes=args.episodes,
             agent_type=args.agent,
-            seed=args.seed
+            seed=args.seed,
+            debug=args.debug
         )
         
         # Save results

@@ -81,12 +81,15 @@ class SmartHeuristicAgent:
     1. Aggressive Loop Breaking: If any action repeats 2+ times → change
     2. Strong Exploration: 50% random to escape dead-ends in hard tasks
     3. Memory: Tracks bad action combinations to avoid repeating them
+    4. DEBUG MODE: Optional step-by-step trace
     
     This prevents the agent from getting stuck in penalty spirals.
     """
     
-    def __init__(self, env: EmergencyResponseEnv):
+    def __init__(self, env: EmergencyResponseEnv, debug: bool = False):
         self.env = env
+        self.debug = debug
+        self.step_count = 0
         self.last_action = None
         self.action_repeat_count = 0
         # Higher exploration rate for hard tasks
@@ -121,9 +124,11 @@ class SmartHeuristicAgent:
         if not available_ambulances or not unassigned_emergencies or not available_hospitals:
             return {"ambulance_id": 1, "emergency_id": 1, "hospital_id": 1}
         
-        # **AGGRESSIVE LOOP BREAKING**: If same action repeats 2+ times, force change
-        if self.last_action is not None and self.action_repeat_count >= 2:
-            # Force random action to escape immediately
+        # **AGGRESSIVE LOOP BREAKING**: If same action repeats even ONCE, force random exploration
+        if self.last_action is not None and self.action_repeat_count >= 1:
+            if self.debug:
+                print(f"[LOOP_BREAK] Detected repeat (count={self.action_repeat_count}), forcing random")
+            # Force RANDOM action to escape immediately
             ambulance_id = int(np.random.choice([a["id"] for a in available_ambulances]))
             emergency_id = int(np.random.choice([e["id"] for e in unassigned_emergencies]))
             hospital_id = int(np.random.choice([h["id"] for h in available_hospitals]))
@@ -140,8 +145,30 @@ class SmartHeuristicAgent:
             self.bad_actions.add((ambulance_id, emergency_id, hospital_id))
             return action
         
-        # **EXPLORATION**: 50% random during hard task to find better paths
-        if np.random.random() < self.exploration_rate or self.negative_streak > 5:
+        # **EMERGENCY EXPLORATION**: If we're in negative streak, explore aggressively
+        if self.negative_streak > 3:
+            if self.debug:
+                print(f"[EMERGENCY] Negative streak={self.negative_streak}, forcing exploration")
+            # Force exploration to break out of penalty spiral
+            ambulance_id = int(np.random.choice([a["id"] for a in available_ambulances]))
+            emergency_id = int(np.random.choice([e["id"] for e in unassigned_emergencies]))
+            hospital_id = int(np.random.choice([h["id"] for h in available_hospitals]))
+            
+            action = {
+                "ambulance_id": ambulance_id,
+                "emergency_id": emergency_id,
+                "hospital_id": hospital_id
+            }
+            # Track this action
+            if action == self.last_action:
+                self.action_repeat_count += 1
+            else:
+                self.action_repeat_count = 0
+                self.last_action = action
+            return action
+        
+        # **STANDARD EXPLORATION**: 50% random during hard task to find better paths
+        if np.random.random() < self.exploration_rate:
             # EXPLORATION: random action
             ambulance_id = int(np.random.choice([a["id"] for a in available_ambulances]))
             emergency_id = int(np.random.choice([e["id"] for e in unassigned_emergencies]))
@@ -188,12 +215,27 @@ class SmartHeuristicAgent:
         
         self.last_action = action
         self.steps_since_last_positive += 1
+        self.step_count += 1
+        
+        # DEBUG OUTPUT
+        if self.debug:
+            print(f"[AGENT] Step {self.step_count}: action={action} "
+                  f"repeat_count={self.action_repeat_count} "
+                  f"neg_streak={self.negative_streak} "
+                  f"exploration_rate={self.exploration_rate:.1%}")
+        
         return action
     
     def record_reward(self, reward: float) -> None:
-        """Optional reward tracking."""
+        """Track reward for learning and negative streak detection."""
         if reward > 0:
             self.steps_since_last_positive = 0
+            self.negative_streak = 0
+        else:
+            self.negative_streak += 1
+        
+        if self.debug:
+            print(f"[REWARD] {reward:+.2f} | neg_streak={self.negative_streak}")
 
 
 class QLearningAgent:
