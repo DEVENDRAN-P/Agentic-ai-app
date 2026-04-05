@@ -199,6 +199,10 @@ def run_inference(
             if hasattr(agent, 'record_reward'):
                 agent.record_reward(float(reward))
             
+            # **CRITICAL**: Mark action as bad so agent learns to avoid it
+            if hasattr(agent, 'mark_action_bad') and reward <= -0.30:
+                agent.mark_action_bad(action, reward)
+            
             step_history.append((state, action, reward, done))
             episode_reward += reward
             
