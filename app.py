@@ -100,17 +100,18 @@ def ping() -> dict:
         )
 
 
-@app.get("/reset")
+@app.api_route("/reset", methods=["GET", "POST"])
 def reset_default() -> dict:
-    """Reset endpoint - Default to easy"""
+    """Reset endpoint - Default to easy (GET or POST)"""
     return reset_with_difficulty("easy")
 
 
-@app.get("/reset/{difficulty}")
+@app.api_route("/reset/{difficulty}", methods=["GET", "POST"])
 def reset_with_difficulty(difficulty: str = "easy") -> dict:
     """Reset endpoint - Requirement 2: Callable reset() function - Returns observation
     
-    Query Parameters:
+    Supports both GET and POST methods.
+    Query Parameters or Body:
         difficulty: str - "easy", "medium", or "hard"
     
     Returns:
