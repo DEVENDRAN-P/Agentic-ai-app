@@ -25,11 +25,20 @@ def validate_command():
     
     errors = []
     
-    # 1. Check openenv.yaml
+    # 1. Check openenv.yaml (try root first, then configs/)
+    config_path = None
+    if os.path.exists('openenv.yaml'):
+        config_path = 'openenv.yaml'
+    elif os.path.exists('configs/openenv.yaml'):
+        config_path = 'configs/openenv.yaml'
+    
     try:
-        with open('configs/openenv.yaml', 'r') as f:
+        if not config_path:
+            raise FileNotFoundError("openenv.yaml not found at root or configs/")
+        
+        with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
-        print("✅ Found openenv.yaml")
+        print(f"✅ Found openenv.yaml at {config_path}")
         
         required_fields = ['version', 'name', 'environment', 'spaces']
         for field in required_fields:
@@ -38,8 +47,8 @@ def validate_command():
             else:
                 print(f"  ✅ {field}: {config[field] if isinstance(config[field], (str, int)) else '...'}")
     except FileNotFoundError:
-        errors.append("openenv.yaml not found at configs/openenv.yaml")
-        print("❌ openenv.yaml missing")
+        errors.append("openenv.yaml not found at root or configs/openenv.yaml")
+        print("❌ openenv.yaml missing (checked: openenv.yaml, configs/openenv.yaml)")
     except Exception as e:
         errors.append(f"Failed to parse openenv.yaml: {e}")
         print(f"❌ openenv.yaml parse error: {e}")

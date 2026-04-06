@@ -93,9 +93,20 @@ def check_all_requirements():
         failed_checks.append(f"Model loading error: {str(e)}")
     
     # 2.3 OpenEnv YAML config
-    print("\n  OpenEnv Configuration (configs/openenv.yaml):")
+    print("\n  OpenEnv Configuration:")
     try:
-        with open("configs/openenv.yaml") as f:
+        # Try root first, then configs/
+        config_path = None
+        if Path("openenv.yaml").exists():
+            config_path = "openenv.yaml"
+            print("  (found at openenv.yaml)")
+        elif Path("configs/openenv.yaml").exists():
+            config_path = "configs/openenv.yaml"
+            print("  (found at configs/openenv.yaml)")
+        else:
+            raise FileNotFoundError("openenv.yaml not found at root or configs/")
+        
+        with open(config_path) as f:
             config = yaml.safe_load(f)
         
         # Check version

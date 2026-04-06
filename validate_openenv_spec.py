@@ -20,7 +20,6 @@ def validate():
         "src/env.py",
         "src/inference.py",
         "src/graders.py",
-        "configs/openenv.yaml",
         "README.md",
     ]
     
@@ -30,6 +29,18 @@ def validate():
         else:
             errors.append(f"Missing: {file}")
             print(f"   ❌ {file}")
+    
+    # Check for openenv.yaml in root or configs/
+    openenv_yaml_path = None
+    if Path("openenv.yaml").exists():
+        openenv_yaml_path = "openenv.yaml"
+        print(f"   ✅ openenv.yaml (at root)")
+    elif Path("configs/openenv.yaml").exists():
+        openenv_yaml_path = "configs/openenv.yaml"
+        print(f"   ✅ openenv.yaml (at configs/)")
+    else:
+        errors.append("Missing: openenv.yaml")
+        print(f"   ❌ openenv.yaml (not found at root or configs/)")
     
     # 2. Check environment implementation
     print("\n2️⃣  Checking environment implementation...")
@@ -64,8 +75,11 @@ def validate():
     # 3. Check OpenEnv config
     print("\n3️⃣  Checking OpenEnv configuration...")
     try:
+        if not openenv_yaml_path:
+            raise FileNotFoundError("openenv.yaml not found")
+        
         import yaml
-        with open("configs/openenv.yaml") as f:
+        with open(openenv_yaml_path) as f:
             config = yaml.safe_load(f)
         
         if config.get("version") == "1.0":

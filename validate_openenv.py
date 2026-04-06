@@ -28,7 +28,17 @@ def check_file_exists(filepath: str) -> tuple[bool, str]:
 def check_openenv_yaml() -> tuple[bool, str]:
     """Check if openenv.yaml has required fields."""
     try:
-        with open('configs/openenv.yaml', 'r') as f:
+        # Try root first, then configs/
+        config_path = None
+        if Path('openenv.yaml').exists():
+            config_path = 'openenv.yaml'
+        elif Path('configs/openenv.yaml').exists():
+            config_path = 'configs/openenv.yaml'
+        
+        if not config_path:
+            return False, f"❌ openenv.yaml not found (checked: openenv.yaml, configs/openenv.yaml)"
+        
+        with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
         
         required_fields = ['version', 'name', 'environment', 'spaces']
@@ -170,13 +180,16 @@ def main():
     checks = []
     all_passed = True
     
-    # Check 1: openenv.yaml exists
-    exists, msg = check_file_exists('configs/openenv.yaml')
-    checks.append(msg)
-    all_passed = all_passed and exists
+    # Check 1: openenv.yaml exists (try root, then configs/)
+    config_exists = Path('openenv.yaml').exists() or Path('configs/openenv.yaml').exists()
+    if config_exists:
+        checks.append("✅ openenv.yaml found")
+    else:
+        checks.append("❌ openenv.yaml not found (checked: openenv.yaml, configs/openenv.yaml)")
+        all_passed = False
     
     # Check 2: openenv.yaml structure
-    if exists:
+    if config_exists:
         valid, msg = check_openenv_yaml()
         checks.append(msg)
         all_passed = all_passed and valid

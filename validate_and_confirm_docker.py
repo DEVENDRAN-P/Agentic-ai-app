@@ -42,8 +42,17 @@ def main():
         print("   ✓ Action model")
         print("   ✓ Reward model")
         
-        # Check config
-        with open("configs/openenv.yaml") as f:
+        # Check config (try root first, then configs/)
+        config_path = None
+        if Path("openenv.yaml").exists():
+            config_path = "openenv.yaml"
+        elif Path("configs/openenv.yaml").exists():
+            config_path = "configs/openenv.yaml"
+        
+        if not config_path:
+            raise FileNotFoundError("openenv.yaml not found")
+        
+        with open(config_path) as f:
             config = yaml.safe_load(f)
         
         tasks = config.get("environment", {}).get("tasks", {})
