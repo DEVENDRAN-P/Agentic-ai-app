@@ -27,5 +27,8 @@ test = [
     "pytest"
 ]
 
+[project.scripts]
+server = "server.app:app"
+
 [tool.setuptools]
-packages = ["src"]
+packages = ["src", "server"]
