@@ -156,8 +156,8 @@ Return only 3 numbers (ambulance_id, emergency_id, hospital_id) without explanat
                     "emergency_id": min(int(numbers[1]), len(self.env.emergencies)),
                     "hospital_id": min(int(numbers[2]), self.env.num_hospitals)
                 }
-        except:
-            pass
+        except Exception as e:
+            print(f"Error in LLM call: {e}", file=sys.stderr)
         
         return self.fallback_agent.get_action(state)
 
@@ -317,7 +317,7 @@ def main():
     parser = argparse.ArgumentParser(description="OpenEnv Emergency Response Inference")
     parser.add_argument("--task", choices=["easy", "medium", "hard"], default="easy", help="Task difficulty")
     parser.add_argument("--episodes", type=int, default=5, help="Number of episodes")
-    parser.add_argument("--agent", choices=["random", "heuristic", "qlearn", "llm"], default="heuristic", help="Agent type")
+    parser.add_argument("--agent", choices=["random", "heuristic", "qlearn", "llm"], default="llm", help="Agent type")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--output", type=str, default="results.json", help="Output file")
     parser.add_argument("--debug", action="store_true", help="Enable debug output (shows agent decisions)")
