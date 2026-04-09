@@ -87,7 +87,7 @@ class EmergencyResponseGrader:
             Normalized score [0.0, 1.0]
         """
         if env.total_high_severity == 0:
-            return 1.0  # Perfect score if no high-severity cases
+            return 1.0 - 1e-9  # Perfect score if no high-severity cases
         
         # Calculate percentage of high-severity handled
         high_severity_percentage = env.high_severity_handled / max(env.total_high_severity, 1)
@@ -117,7 +117,7 @@ class EmergencyResponseGrader:
         num_assigned = sum(1 for e in env.emergencies if e["assigned_ambulance"] is not None)
         
         if num_assigned == 0:
-            return 0.0  # No emergencies handled
+            return 1e-9  # No emergencies handled, return a score just above 0
         
         average_response_time = env.total_response_time / num_assigned
         
