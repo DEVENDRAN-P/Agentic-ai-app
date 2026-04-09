@@ -68,8 +68,8 @@ class EmergencyResponseGrader:
         # If agent got many negative rewards, penalize the score
         stats["final_score"] *= reward_quality
         
-        # Clamp to [0, 1]
-        stats["final_score"] = max(0.0, min(1.0, stats["final_score"]))
+        # Clamp to (0, 1) - STRICTLY between 0 and 1 per hackathon rules
+        stats["final_score"] = max(1e-9, min(1.0 - 1e-9, stats["final_score"]))
         
         # Track reward quality for debugging
         stats["reward_quality"] = reward_quality
@@ -101,7 +101,7 @@ class EmergencyResponseGrader:
                     penalty += (emergency["time_waiting"] - 5) * 0.01
         
         priority_score = high_severity_percentage - min(penalty, 0.3)
-        return max(0.0, min(1.0, priority_score))
+        return max(1e-9, min(1.0 - 1e-9, priority_score))
     
     def _calculate_response_speed(self, env: EmergencyResponseEnv, step_history: List) -> float:
         """
@@ -131,7 +131,7 @@ class EmergencyResponseGrader:
         
         # Calculate speed score (upper-bounded at 1.0)
         speed_score = 1.0 - (average_response_time / max_acceptable_time)
-        return max(0.0, min(1.0, speed_score))
+        return max(1e-9, min(1.0 - 1e-9, speed_score))
     
     def _calculate_resource_usage(self, env: EmergencyResponseEnv, step_history: List) -> float:
         """
@@ -164,7 +164,7 @@ class EmergencyResponseGrader:
         
         # Combined resource score
         resource_score = 0.6 * ambulance_utilization + 0.4 * balance_score
-        return max(0.0, min(1.0, resource_score))
+        return max(1e-9, min(1.0 - 1e-9, resource_score))
     
     def _calculate_reward_quality(self, step_history: List[Tuple]) -> float:
         """
@@ -266,7 +266,7 @@ class EasyTaskGrader(EmergencyResponseGrader):
         num_assigned = sum(1 for e in env.emergencies if e["assigned_ambulance"] is not None)
         assignment_bonus = (num_assigned / len(env.emergencies)) * 0.1
         
-        stats["final_score"] = min(1.0, stats["final_score"] + assignment_bonus)
+        stats["final_score"] = min(1.0 - 1e-9, stats["final_score"] + assignment_bonus)
         return stats
 
 
@@ -284,7 +284,7 @@ class MediumTaskGrader(EmergencyResponseGrader):
             0.15 * stats["resource_usage"]       # Decreased from 0.2
         )
         
-        stats["final_score"] = max(0.0, min(1.0, stats["final_score"]))
+        stats["final_score"] = max(1e-9, min(1.0 - 1e-9, stats["final_score"]))
         return stats
 
 
@@ -306,7 +306,7 @@ class HardTaskGrader(EmergencyResponseGrader):
         if env.step_count > env.max_steps * 0.8:
             penalty += 0.1
         
-        stats["final_score"] = max(0.0, stats["final_score"] - penalty)
+        stats["final_score"] = max(1e-9, stats["final_score"] - penalty)
         return stats
 
 
