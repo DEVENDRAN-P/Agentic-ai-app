@@ -1,0 +1,233 @@
+version: "1.0"
+name: "Emergency Response Environment"
+description: "AI-powered emergency response simulation for smart cities and disaster management"
+
+# Environment metadata
+metadata:
+  problem: |
+    Emergency response optimization where AI learns to assign ambulances to emergencies
+    and select hospitals, while managing constraints like ambulance availability,
+    hospital capacity, and traffic delays.
+
+  real_world_impact: |
+    Used in smart cities, disaster management, and healthcare logistics to optimize
+    emergency response systems that save lives.
+
+  hackathon_category: "Smart Systems & Optimization"
+
+# Environment configuration
+environment:
+  class: "src.env.EmergencyResponseEnv"
+  file: "src/env.py"
+
+  # Task difficulties available
+  tasks:
+    easy:
+      description: "Basic ambulance assignment (2-3 emergencies, all resources available)"
+      difficulty_level: 1
+      num_emergencies: 3
+      ambulances_available: 6
+      hospital_capacity: 10
+      traffic_factor: 1.0
+
+    medium:
+      description: "Prioritization under constraints (4-5 emergencies, limited resources)"
+      difficulty_level: 2
+      num_emergencies: 5
+      ambulances_available: 4
+      hospital_capacity: 4
+      traffic_factor: 1.5
+
+    hard:
+      description: "Complex decision-making (6-8 emergencies, high stress)"
+      difficulty_level: 3
+      num_emergencies: 8
+      ambulances_available: 2
+      hospital_capacity: 2
+      traffic_factor: 2.0
+
+# State and Action spaces
+spaces:
+  observation:
+    format: "dictionary"
+    fields:
+      - name: "emergencies"
+        type: "array"
+        description: "List of active emergencies with severity, location, waiting time"
+        sample:
+          - id: 1
+            severity: 9
+            location: 2
+            time_waiting: 3
+            assigned: false
+
+      - name: "ambulances"
+        type: "array"
+        description: "List of ambulances with location and availability status"
+        sample:
+          - id: 1
+            location: 1
+            available: true
+            busy_until: 0
+
+      - name: "hospitals"
+        type: "array"
+        description: "List of hospitals with capacity information"
+        sample:
+          - id: 1
+            capacity: 2
+            patients: 0
+
+      - name: "traffic_level"
+        type: "integer"
+        description: "Current traffic congestion (1-5 scale)"
+
+  action:
+    format: "dictionary"
+    description: "Agent must select which ambulance, emergency, and hospital to assign"
+    fields:
+      - name: "ambulance_id"
+        type: "integer"
+        description: "Which ambulance to dispatch (1 to num_ambulances)"
+        range: [1, 6]
+
+      - name: "emergency_id"
+        type: "integer"
+        description: "Which emergency to respond to (1 to num_emergencies)"
+        range: [1, 8]
+
+      - name: "hospital_id"
+        type: "integer"
+        description: "Which hospital to send patient to (1 to num_hospitals)"
+        range: [1, 3]
+
+    sample: { "ambulance_id": 1, "emergency_id": 2, "hospital_id": 1 }
+
+# Reward function specification
+reward:
+  description: "Composite reward encouraging fast response, priority handling, and efficiency"
+
+  formula: |
+    total_reward = 0.5 * priority_handling_reward 
+                 + 0.3 * response_speed_reward 
+                 + 0.2 * resource_usage_reward
+
+  components:
+    priority_handling:
+      weight: 0.5
+      description: "Reward for handling high-severity cases first"
+      range: [-0.5, 1.0]
+      bonus: "High-severity (severity >= 8) cases get priority"
+      penalty: "Penalty for handling low-severity when high-severity waiting"
+
+    response_speed:
+      weight: 0.3
+      description: "Reward for quick response time"
+      range: [0.0, 0.3]
+      bonus: "Fast response reduces penalties"
+      penalty: "Each unit of waiting time reduces reward"
+
+    resource_usage:
+      weight: 0.2
+      description: "Reward for efficient ambulance and hospital utilization"
+      range: [0.0, 0.2]
+      bonus: "Using hospital with available capacity"
+      penalty: "Sending to hospital at max capacity"
+
+  step_rewards:
+    assign_ambulance_quickly: +0.4
+    handle_high_severity_first: +0.5
+    efficient_hospital_choice: +0.3
+    delay_penalty: -0.3
+    wrong_prioritization: -0.5
+    no_ambulance_assigned: -0.4
+
+  normalization: "All metrics normalized to [0.0, 1.0]"
+  clipping: "Per-step rewards clamped to [-1.0, 1.0]"
+
+# Grader/Evaluation specification
+grading:
+  class: "src.graders.EmergencyResponseGrader"
+  file: "src/graders.py"
+
+  metrics:
+    - name: "Priority Handling"
+      weight: 0.5
+      description: "% of high-severity cases handled appropriately"
+      formula: "high_severity_handled / total_high_severity"
+
+    - name: "Response Speed"
+      weight: 0.3
+      description: "Average response time efficiency"
+      formula: "1 - (actual_avg_time / max_acceptable_time)"
+
+    - name: "Resource Usage"
+      weight: 0.2
+      description: "Ambulance and hospital utilization efficiency"
+      formula: "0.6 * ambulance_util + 0.4 * balance_score"
+
+  final_score:
+    formula: "0.5*metric1 + 0.3*metric2 + 0.2*metric3"
+    range: [0.0, 1.0]
+    interpretation:
+      0.0-0.3: "Poor - Critical decision errors"
+      0.3-0.6: "Fair - Some optimization but room for improvement"
+      0.6-0.8: "Good - Solid decision-making"
+      0.8-1.0: "Excellent - Optimal performance"
+
+# Inference specification
+inference:
+  class: "inference"
+  file: "inference.py"
+
+  baseline_agents:
+    - name: "RandomBaselineAgent"
+      description: "Makes random valid actions (establishes baseline)"
+      expected_score: "0.35-0.45"
+
+    - name: "SmartHeuristicAgent"
+      description: "Uses prioritization rules (easy/medium performance)"
+      expected_score: "0.55-0.70"
+
+  expected_llm_agent_score:
+    easy: "0.80-0.95"
+    medium: "0.70-0.85"
+    hard: "0.60-0.75"
+
+# API compatibility
+api:
+  framework: "gymnasium"
+  methods:
+    - name: "reset()"
+      returns: "observation (state dict)"
+      description: "Initialize/reset environment"
+
+    - name: "step(action)"
+      args: "action dict"
+      returns: "(observation, reward, done, info)"
+      description: "Execute one step"
+
+    - name: "render()"
+      returns: "void"
+      description: "Visualize current state (optional)"
+
+# Deployment settings
+deployment:
+  dockerfile: "Dockerfile"
+  huggingface_spaces: true
+  requires:
+    - "python>=3.9"
+    - "numpy"
+    - "gymnasium"
+
+  test_command: "python inference.py --task easy --episodes 1 --seed 42"
+
+  entry_point: "inference.py"
+
+# Documentation references
+references:
+  problem_statement: "README.md"
+  environment_design: "README.md#environment-design"
+  reward_function: "README.md#reward-function"
+  grading_system: "README.md#grading-system"
+  quick_start: "README.md#quick-start"
