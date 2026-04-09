@@ -238,7 +238,7 @@ def run_inference(
             # This is more aggressive than before to stop bad behavior early
             if stuck_counter >= 3:
                 done = True
-                reward = -0.5  # Penalty for getting stuck
+                reward = 0.0  # Penalty for getting stuck
             else:
                 # Environment executes
                 next_state, reward, done, info = env.step(action)

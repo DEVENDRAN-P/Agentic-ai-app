@@ -280,11 +280,11 @@ class EmergencyResponseEnv:
             # Agent should learn, not be destroyed
             error_severity = validation_info.get("error_severity", "light")
             if error_severity == "critical":
-                reward = -0.05  # Wrong ID - small penalty (agent can recover)
+                reward = 0.00  # Wrong ID - small penalty (agent can recover)
             elif error_severity == "medium":
-                reward = -0.02  # Resource constraint - tiny penalty
+                reward = 0.00  # Resource constraint - tiny penalty
             else:  # light
-                reward = -0.01  # Already assigned - almost no penalty
+                reward = 0.00  # Already assigned - almost no penalty
             
             self.consecutive_invalid_actions += 1
         
@@ -397,12 +397,12 @@ class EmergencyResponseEnv:
                 priority_bonus = +0.4  # BIG bonus for handling high-severity ✅
         elif emergency["severity"] >= 5:  # MEDIUM severity
             if has_higher_priority_waiting:
-                priority_bonus = -0.05  # Small penalty (minor issue)
+                priority_bonus = 0.00  # Small penalty (minor issue)
             else:
                 priority_bonus = +0.2  # Good choice
         else:  # LOW severity
             if has_higher_priority_waiting:
-                priority_bonus = -0.15  # Penalty for skipping high priority
+                priority_bonus = 0.005  # Penalty for skipping high priority
             else:
                 priority_bonus = +0.05  # OK
         
@@ -417,7 +417,7 @@ class EmergencyResponseEnv:
         elif response_time <= 15:
             speed_bonus = +0.02  # Slower but okay
         else:
-            speed_bonus = -0.05  # Slow - minor penalty
+            speed_bonus = 0.00  # Slow - minor penalty
         
         reward += speed_bonus
         
@@ -431,7 +431,7 @@ class EmergencyResponseEnv:
         elif hospital_utilization <= 0.95:
             resource_bonus = 0.0  # Near full - neutral
         else:
-            resource_bonus = -0.02  # Nearly full - very small penalty
+            resource_bonus = 0.00  # Nearly full - very small penalty
         
         reward += resource_bonus
         
